@@ -73,7 +73,7 @@ impl CertificateSigningRequestParams {
 								.push(SanType::try_from_general(name)?);
 						}
 					},
-					_ => return Err(Error::UnsupportedExtension),
+					_ => {}, // return Err(Error::UnsupportedExtension),
 				}
 			}
 		}
