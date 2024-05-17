@@ -1,9 +1,15 @@
+use std::{fmt, fs::File, io, path::Path};
+
 use bpaf::Bpaf;
 use rcgen::{
 	BasicConstraints, Certificate, CertificateParams, DistinguishedName, DnType,
 	DnValue::PrintableString, ExtendedKeyUsagePurpose, IsCa, KeyPair, KeyUsagePurpose, SanType,
 };
-use std::{fmt, fs::File, io, path::Path};
+
+#[cfg(feature = "aws_lc_rs")]
+use aws_lc_rs as ring_like;
+#[cfg(all(feature = "ring", not(feature = "aws_lc_rs")))]
+use ring as ring_like;
 
 #[derive(Debug, Clone)]
 /// PEM serialized Certificate and PEM serialized corresponding private key
@@ -107,7 +113,7 @@ impl CaBuilder {
 	/// build `Ca` Certificate.
 	pub fn build(self) -> Result<Ca, rcgen::Error> {
 		let key_pair = self.alg.to_key_pair()?;
-		let cert = Certificate::generate_self_signed(self.params, &key_pair)?;
+		let cert = self.params.self_signed(&key_pair)?;
 		Ok(Ca { cert, key_pair })
 	}
 }
@@ -197,7 +203,9 @@ impl EndEntityBuilder {
 	/// build `EndEntity` Certificate.
 	pub fn build(self, issuer: &Ca) -> Result<EndEntity, rcgen::Error> {
 		let key_pair = self.alg.to_key_pair()?;
-		let cert = Certificate::generate(self.params, &key_pair, &issuer.cert, &issuer.key_pair)?;
+		let cert = self
+			.params
+			.signed_by(&key_pair, &issuer.cert, &issuer.key_pair)?;
 		Ok(EndEntity { cert, key_pair })
 	}
 }
@@ -205,18 +213,24 @@ impl EndEntityBuilder {
 /// Supported Keypair Algorithms
 #[derive(Clone, Copy, Debug, Default, Bpaf, PartialEq)]
 pub enum KeyPairAlgorithm {
+	Rsa,
 	Ed25519,
 	#[default]
 	EcdsaP256,
 	EcdsaP384,
+	#[cfg(feature = "aws_lc_rs")]
+	EcdsaP521,
 }
 
 impl fmt::Display for KeyPairAlgorithm {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
+			KeyPairAlgorithm::Rsa => write!(f, "rsa"),
 			KeyPairAlgorithm::Ed25519 => write!(f, "ed25519"),
 			KeyPairAlgorithm::EcdsaP256 => write!(f, "ecdsa-p256"),
 			KeyPairAlgorithm::EcdsaP384 => write!(f, "ecdsa-p384"),
+			#[cfg(feature = "aws_lc_rs")]
+			KeyPairAlgorithm::EcdsaP521 => write!(f, "ecdsa-p521"),
 		}
 	}
 }
@@ -225,38 +239,52 @@ impl KeyPairAlgorithm {
 	/// Return an `rcgen::KeyPair` for the given varient
 	fn to_key_pair(self) -> Result<rcgen::KeyPair, rcgen::Error> {
 		match self {
+			KeyPairAlgorithm::Rsa => rcgen::KeyPair::generate_for(&rcgen::PKCS_RSA_SHA256),
 			KeyPairAlgorithm::Ed25519 => {
-				use ring::signature::Ed25519KeyPair;
+				use ring_like::signature::Ed25519KeyPair;
 
-				let rng = ring::rand::SystemRandom::new();
+				let rng = ring_like::rand::SystemRandom::new();
 				let alg = &rcgen::PKCS_ED25519;
 				let pkcs8_bytes =
 					Ed25519KeyPair::generate_pkcs8(&rng).or(Err(rcgen::Error::RingUnspecified))?;
 
-				rcgen::KeyPair::from_der_and_sign_algo(pkcs8_bytes.as_ref(), alg)
+				rcgen::KeyPair::from_pkcs8_der_and_sign_algo(&pkcs8_bytes.as_ref().into(), alg)
 			},
 			KeyPairAlgorithm::EcdsaP256 => {
-				use ring::signature::EcdsaKeyPair;
-				use ring::signature::ECDSA_P256_SHA256_ASN1_SIGNING;
+				use ring_like::signature::EcdsaKeyPair;
+				use ring_like::signature::ECDSA_P256_SHA256_ASN1_SIGNING;
 
-				let rng = ring::rand::SystemRandom::new();
+				let rng = ring_like::rand::SystemRandom::new();
 				let alg = &rcgen::PKCS_ECDSA_P256_SHA256;
 				let pkcs8_bytes =
 					EcdsaKeyPair::generate_pkcs8(&ECDSA_P256_SHA256_ASN1_SIGNING, &rng)
 						.or(Err(rcgen::Error::RingUnspecified))?;
-				rcgen::KeyPair::from_der_and_sign_algo(pkcs8_bytes.as_ref(), alg)
+				rcgen::KeyPair::from_pkcs8_der_and_sign_algo(&pkcs8_bytes.as_ref().into(), alg)
 			},
 			KeyPairAlgorithm::EcdsaP384 => {
-				use ring::signature::EcdsaKeyPair;
-				use ring::signature::ECDSA_P384_SHA384_ASN1_SIGNING;
+				use ring_like::signature::EcdsaKeyPair;
+				use ring_like::signature::ECDSA_P384_SHA384_ASN1_SIGNING;
 
-				let rng = ring::rand::SystemRandom::new();
+				let rng = ring_like::rand::SystemRandom::new();
 				let alg = &rcgen::PKCS_ECDSA_P384_SHA384;
 				let pkcs8_bytes =
 					EcdsaKeyPair::generate_pkcs8(&ECDSA_P384_SHA384_ASN1_SIGNING, &rng)
 						.or(Err(rcgen::Error::RingUnspecified))?;
 
-				rcgen::KeyPair::from_der_and_sign_algo(pkcs8_bytes.as_ref(), alg)
+				rcgen::KeyPair::from_pkcs8_der_and_sign_algo(&pkcs8_bytes.as_ref().into(), alg)
+			},
+			#[cfg(feature = "aws_lc_rs")]
+			KeyPairAlgorithm::EcdsaP521 => {
+				use ring_like::signature::EcdsaKeyPair;
+				use ring_like::signature::ECDSA_P521_SHA512_ASN1_SIGNING;
+
+				let rng = ring_like::rand::SystemRandom::new();
+				let alg = &rcgen::PKCS_ECDSA_P521_SHA512;
+				let pkcs8_bytes =
+					EcdsaKeyPair::generate_pkcs8(&ECDSA_P521_SHA512_ASN1_SIGNING, &rng)
+						.or(Err(rcgen::Error::RingUnspecified))?;
+
+				rcgen::KeyPair::from_pkcs8_der_and_sign_algo(&pkcs8_bytes.as_ref().into(), alg)
 			},
 		}
 	}
@@ -325,6 +353,26 @@ mod tests {
 		let ca = CertificateBuilder::new().certificate_authority().build()?;
 		let end_entity = CertificateBuilder::new()
 			.signature_algorithm(KeyPairAlgorithm::EcdsaP384)?
+			.end_entity()
+			.build(&ca)?
+			.serialize_pem();
+
+		let der = pem::parse(end_entity.cert_pem)?;
+		let (_, cert) = X509Certificate::from_der(der.contents())?;
+
+		let issuer_der = pem::parse(ca.serialize_pem().cert_pem)?;
+		let (_, issuer) = X509Certificate::from_der(issuer_der.contents())?;
+
+		check_signature(&cert, &issuer);
+		Ok(())
+	}
+
+	#[test]
+	#[cfg(feature = "aws_lc_rs")]
+	fn serialize_end_entity_ecdsa_p521_sha512_sig() -> anyhow::Result<()> {
+		let ca = CertificateBuilder::new().certificate_authority().build()?;
+		let end_entity = CertificateBuilder::new()
+			.signature_algorithm(KeyPairAlgorithm::EcdsaP521)?
 			.end_entity()
 			.build(&ca)?
 			.serialize_pem();
@@ -439,6 +487,15 @@ mod tests {
 			format!("{:?}", keypair.algorithm()),
 			"PKCS_ECDSA_P384_SHA384"
 		);
+
+		#[cfg(feature = "aws_lc_rs")]
+		{
+			let keypair = KeyPairAlgorithm::EcdsaP521.to_key_pair()?;
+			assert_eq!(
+				format!("{:?}", keypair.algorithm()),
+				"PKCS_ECDSA_P521_SHA512"
+			);
+		}
 		Ok(())
 	}
 }

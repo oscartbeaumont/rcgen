@@ -2,17 +2,28 @@
 name = "rustls-cert-gen"
 version = "0.1.0"
 description = "Rust X.509 certificate generator CLI"
+documentation = "https://docs.rs/rustls-cert-gen"
+homepage = "https://github.com/rustls/rcgen/tree/main/rustls-cert-gen"
+repository = "https://github.com/rustls/rcgen"
 license.workspace = true
 edition.workspace = true
 keywords.workspace = true
 
+[features]
+default = ["ring"]
+aws_lc_rs = ["dep:aws-lc-rs", "rcgen/aws_lc_rs"]
+ring = ["dep:ring", "rcgen/ring"]
+fips = ["aws_lc_rs", "aws-lc-rs?/fips"]
+
 [dependencies]
-rcgen = { path = "../rcgen", default-features = false, features = ["pem", "ring"] }
+rcgen = { version = "0.13", path = "../rcgen", default-features = false, features = ["pem"] }
 bpaf = { version = "0.9.5", features = ["derive"] }
 pem = { workspace = true }
-ring = { workspace = true }
+pki-types = { workspace = true }
+ring = { workspace = true, optional = true }
 rand = { workspace = true }
 anyhow = "1.0.75"
+aws-lc-rs = { workspace = true, optional = true }
 
 [dev-dependencies]
 assert_fs = "1.0.13"

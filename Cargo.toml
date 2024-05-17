@@ -3,10 +3,12 @@ members = ["rcgen", "rustls-cert-gen"]
 resolver = "2"
 
 [workspace.dependencies]
+aws-lc-rs = "1.6.0"
 pem = "3.0.2"
+pki-types = { package = "rustls-pki-types", version = "1.4.1" }
 rand = "0.8"
 ring = "0.17"
-x509-parser = "0.15.1"
+x509-parser = "0.16"
 
 [workspace.package]
 license = "MIT OR Apache-2.0"
